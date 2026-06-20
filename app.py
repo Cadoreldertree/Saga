@@ -156,6 +156,6 @@ if __name__ == '__main__':
     print("🚀 QuestForge Local (Grok xAI API) → http://localhost:5000")
     print(f"   Model: {GROK_MODEL}")
     if __name__ == '__main__':
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+        import os
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host='0.0.0.0', port=port)
