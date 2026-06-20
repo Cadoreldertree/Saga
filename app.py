@@ -33,6 +33,14 @@ def init_db():
 
 init_db()
 
+def load_rules():
+    try:
+        with open("dm_rules.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print("Warning: dm_rules.txt not found")
+        return ""
+
 # Load .env from the same directory as app.py
 load_dotenv()
 
@@ -80,11 +88,15 @@ if not XAI_API_KEY or XAI_API_KEY.strip() == "" or "your-real-api-key" in XAI_AP
     print("   XAI_API_KEY=xai-yourActualKeyHere\n")
     exit(1)
 
-SYSTEM_PROMPT = """You are QuestForge — the ultimate living Dungeon Master, powered by Grok.
-You are running a full persistent tabletop RPG campaign.
-Never break character unless the player types /meta.
-Track everything: HP, inventory, spell slots, conditions, gold, location, time of day, active quests, NPCs attitudes.
+RULES_TEXT = load_rules()
 
+SYSTEM_PROMPT = f"""
+You are QuestForge.
+
+You must obey the rules and instructions below at all times.
+
+{RULES_TEXT}
+"""
 Header format (show at top of every response after game starts):
 === QUESTFORGE ===
 System: D&D 5e (or whatever chosen)
@@ -155,6 +167,25 @@ def roll_dice(dice: str):
         detail += f" {'+' if mod > 0 else ''}{mod}"
     return f"🎲 {dice.upper()} → {detail} = **{total}**"
 
+def build_campaign_context(game):
+    char = game["character"]
+
+    return f"""
+CURRENT CHARACTER
+
+Name: {char['name']}
+Level: {char['level']}
+HP: {char['hp']}/{char['max_hp']}
+AC: {char['ac']}
+Gold: {char['gold']}
+
+Inventory:
+{", ".join(char['inventory']) if char['inventory'] else "Empty"}
+
+Conditions:
+{", ".join(char['conditions']) if char['conditions'] else "None"}
+"""
+
 @app.route('/chat', methods=['POST'])
 def chat():
     global game
@@ -174,12 +205,21 @@ def chat():
     # Let Grok handle the rest
     game["history"].append({"role": "user", "content": user_message})
 
-    payload = {
-        "model": GROK_MODEL,
-        "messages": game["history"],
-        "temperature": 0.85,
-        "max_tokens": 4096
+    campaign_context = build_campaign_context(game)
+
+messages = [
+    {
+        "role": "system",
+        "content": campaign_context
     }
+] + game["history"]
+
+payload = {
+    "model": GROK_MODEL,
+    "messages": messages,
+    "temperature": 0.85,
+    "max_tokens": 4096
+}
 
     try:
         response = requests.post(
@@ -246,6 +286,7 @@ def chat():
 if __name__ == '__main__':
     print("🚀 QuestForge Local (Grok xAI API) → http://localhost:5000")
     print(f"   Model: {GROK_MODEL}")
+    print("   Loaded rules: rules/dm_rules.txt")
     if __name__ == '__main__':
         import os
         port = int(os.environ.get("PORT", 5000))
