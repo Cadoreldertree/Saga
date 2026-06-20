@@ -1,11 +1,36 @@
 # app.py - QuestForge Local → powered by official Grok xAI API (.env version)
 from flask import Flask, render_template, request, jsonify, redirect, session
+import sqlite3
+import uuid
 import json
 import os
 import random
 import re
 import requests
 from dotenv import load_dotenv   # ← This line is new
+DB_FILE = "campaigns.db"
+
+def get_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY,
+        history TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # Load .env from the same directory as app.py
 load_dotenv()
@@ -35,7 +60,12 @@ def index():
         return redirect('/login')
 
     return render_template('index.html')
-
+    
+def get_campaign_id():
+    if "campaign_id" not in session:
+        session["campaign_id"] = str(uuid.uuid4())
+    return session["campaign_id"]
+    
 SAVE_FILE = "campaign_save.json"
 
 # These will now come from .env (with sensible defaults/fallbacks)
@@ -76,19 +106,38 @@ Player commands you MUST recognize:
 Be vivid, funny when appropriate, ruthless when needed. Reward genius, punish stupidity — fairly."""
 
 def load_game():
-    if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+    campaign_id = get_campaign_id()
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("SELECT history FROM campaigns WHERE id = ?", (campaign_id,))
+    row = c.fetchone()
+
+    if row:
+        return json.loads(row["history"])
+
     return {
-        "history": [{"role": "system", "content": SYSTEM_PROMPT}],
-        "metadata": {}
+        "history": [{"role": "system", "content": SYSTEM_PROMPT}]
     }
 
-def save_game(game):
-    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(game, f, ensure_ascii=False, indent=2)
 
-game = load_game()
+def save_game(game):
+    campaign_id = get_campaign_id()
+    conn = get_db()
+    c = conn.cursor()
+
+    history_json = json.dumps(game)
+
+    c.execute("""
+    INSERT INTO campaigns (id, history)
+    VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET history=excluded.history
+    """, (campaign_id, history_json))
+
+    conn.commit()
+    conn.close()
+
+game = None
 
 def roll_dice(dice: str):
     dice = dice.strip().lower().replace(" ", "")
@@ -108,6 +157,9 @@ def roll_dice(dice: str):
 @app.route('/chat', methods=['POST'])
 def chat():
     global game
+
+if game is None:
+    game = load_game()
     user_message = request.json['message'].strip()
 
     # Local manual roll command (faster + real randomness)
