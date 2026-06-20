@@ -23,7 +23,8 @@ def init_db():
     c.execute("""
     CREATE TABLE IF NOT EXISTS campaigns (
         id TEXT PRIMARY KEY,
-        history TEXT
+        history TEXT,
+        character TEXT
     )
     """)
 
