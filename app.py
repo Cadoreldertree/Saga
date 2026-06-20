@@ -158,8 +158,9 @@ def roll_dice(dice: str):
 def chat():
     global game
 
-if game is None:
-    game = load_game()
+    if game is None:
+        game = load_game()
+
     user_message = request.json['message'].strip()
 
     # Local manual roll command (faster + real randomness)
@@ -168,6 +169,43 @@ if game is None:
         game["history"].append({"role": "assistant", "content": result})
         save_game(game)
         return jsonify({"response": result})
+
+    # Let Grok handle the rest
+    game["history"].append({"role": "user", "content": user_message})
+
+    payload = {
+        "model": GROK_MODEL,
+        "messages": game["history"],
+        "temperature": 0.85,
+        "max_tokens": 4096
+    }
+
+    try:
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {XAI_API_KEY}"},
+            json=payload,
+            timeout=90
+        )
+
+        response.raise_for_status()
+        ai_text = response.json()["choices"][0]["message"]["content"]
+
+        # Replace any [Rolling ...] placeholders with real rolls
+        for placeholder in re.findall(r'\[Rolling ([^\]]+?)\]', ai_text):
+            real = roll_dice(placeholder)
+            ai_text = ai_text.replace(f"[Rolling {placeholder}]", real)
+
+        game["history"].append({"role": "assistant", "content": ai_text})
+        save_game(game)
+
+        return jsonify({"response": ai_text})
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({"response": f"⚠️ Connection/API error: {str(e)}"})
+
+    except Exception as e:
+        return jsonify({"response": f"⚠️ Unexpected error: {str(e)}"})
 
     # Let Grok handle the rest
     game["history"].append({"role": "user", "content": user_message})
